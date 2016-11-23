@@ -1,0 +1,58 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: nginx-ingress-lb
+  name: nginx-ingress-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: nginx-ingress-lb
+      name: nginx-ingress-lb
+  template:
+    metadata:
+      labels:
+        k8s-app: nginx-ingress-lb
+        name: nginx-ingress-lb
+    spec:
+      containers:
+      - image: gcr.io/google_containers/nginx-ingress-controller:0.8.2
+        name: nginx-ingress-lb
+        imagePullPolicy: Always
+        #readinessProbe:
+        #  httpGet:
+        #    path: /healthz
+        #    port: 80
+        #    scheme: HTTP
+        #livenessProbe:
+        #  httpGet:
+        #    path: /healthz
+        #    port: 80
+        #    scheme: HTTP
+        #  initialDelaySeconds: 10
+        #  timeoutSeconds: 1
+        # use downward API
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+        ports:
+        - containerPort: 80
+          protocol: TCP
+          name: http
+        - containerPort: 443
+          protocol: TCP
+          name: https
+        - name: http-stats
+          protocol: TCP
+          containerPort: 18080
+        args:
+        - /nginx-ingress-controller
+        - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+        - --nginx-configmap=$(POD_NAMESPACE)/nginx-load-balancer-conf

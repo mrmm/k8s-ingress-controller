@@ -1,0 +1,164 @@
+# Derived from ./manifests/*.yaml
+---
+# File : ./manifests/0-default-backend-deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: default-http-backend
+  name: default-http-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: default-http-backend
+  template:
+    metadata:
+      labels:
+        k8s-app: default-http-backend
+    spec:
+      containers:
+      - name: default-http-backend
+        image: gcr.io/google_containers/defaultbackend:1.0
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        resources:
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+
+---
+# File : ./manifests/0-default-backend-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: default-http-backend
+  name: default-http-backend
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    k8s-app: default-http-backend
+  type: ClusterIP
+
+---
+# File : ./manifests/1-nginx-svc.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: nginx-ingress-controller
+  name: nginx-ingress-controller
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  - name: https
+    port: 443
+    protocol: TCP
+    targetPort: 443
+  - name: http-stats
+    port: 18080
+    protocol: TCP
+    targetPort: 18080
+  selector:
+    k8s-app: nginx-ingress-lb
+  #type: NodePort
+  # For Production purpose uncomment the line bellow 
+  # and comment the line above to create and ELB
+  type: LoadBalancer
+  
+
+---
+# File : ./manifests/2-nginx-configmap.yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: nginx-load-balancer-conf
+data:
+  proxy-connect-timeout: "10" # default is "60s". See http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_connect_timeout
+  proxy-read-timeout: "10" # default is "60s". See http://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_read_timeout
+  client-max-body-size: "2m" # default is "1m". See http://nginx.org/en/docs/http/ngx_http_core_module.html#client_max_body_size
+  server-names-hash-bucket-size: "64" # default value depends on the size of the processor’s cache line. See http://nginx.org/en/docs/http/ngx_http_core_module.html#server_names_hash_bucket_size
+  server-names-hash-max-size: "1024" # default is "512". See http://nginx.org/en/docs/http/ngx_http_core_module.html#server_names_hash_max_size
+  enable-vts-status: "true"
+
+---
+# File : ./manifests/3-nginx-deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  labels:
+    k8s-app: nginx-ingress-lb
+  name: nginx-ingress-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: nginx-ingress-lb
+      name: nginx-ingress-lb
+  template:
+    metadata:
+      labels:
+        k8s-app: nginx-ingress-lb
+        name: nginx-ingress-lb
+    spec:
+      containers:
+      - image: gcr.io/google_containers/nginx-ingress-controller:0.8.2
+        name: nginx-ingress-lb
+        imagePullPolicy: Always
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 80
+            scheme: HTTP
+        #livenessProbe:
+        #  httpGet:
+        #    path: /healthz
+        #    port: 80
+        #    scheme: HTTP
+        #  initialDelaySeconds: 10
+        #  timeoutSeconds: 1
+        # use downward API
+        env:
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+        ports:
+        - containerPort: 80
+          protocol: TCP
+          name: http
+        - containerPort: 443
+          protocol: TCP
+          name: https
+        - name: http-stats
+          protocol: TCP
+          containerPort: 18080
+        args:
+        - /nginx-ingress-controller
+        - --default-backend-service=$(POD_NAMESPACE)/default-http-backend
+        - --nginx-configmap=$(POD_NAMESPACE)/nginx-load-balancer-conf
+
+---
